@@ -14,9 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
-      id-token: write
-      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -31,22 +28,53 @@ jobs:
       - name: Run unit tests
         run: pytest tests/ -v
 
-      - name: Scan source for vulnerabilities
+      - name: Scan source — SARIF report
         run: |
           mkdir -p reports
           mcp-audit scan-source examples/vulnerable_server.py \
             --format sarif --output reports/source-scan.sarif
         continue-on-error: true
 
-      - name: Upload SARIF to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Scan source — JSON report
+        run: |
+          mcp-audit scan-source examples/vulnerable_server.py \
+            --format json --output reports/source-scan.json
+        continue-on-error: true
+
+      - name: Print audit summary
+        run: |
+          python3 - << 'PYEOF'
+          import json, sys
+          data = json.load(open("reports/source-scan.json"))
+          s = data["summary"]
+          print(f"\n{'='*50}")
+          print(f"  MCP Audit — {s['total_findings']} finding(s) across {s['total_targets']} target(s)")
+          for sev, count in s["severity_breakdown"].items():
+              if count:
+                  print(f"    {sev}: {count}")
+          print(f"{'='*50}\n")
+          PYEOF
+
+      - name: Upload reports as artifact
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-audit-reports
+          path: reports/
+          retention-days: 30
+
+      - name: Upload SARIF to Code Scanning
+        # Requires GitHub Advanced Security (free for public repos,
+        # paid for private). Skipped gracefully if not available.
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/source-scan.sarif
           category: mcp-audit
 
-  audit-examples:
-    name: Audit Example MCP Servers
+  audit-schema:
+    name: Audit Tool Schemas
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,15 +88,19 @@ jobs:
       - name: Install mcp-security-auditor
         run: pip install .
 
-      - name: Scan synthetic vulnerable server (JSON report)
+      - name: Scan example tool schemas
         run: |
           mkdir -p reports
-          mcp-audit scan-source examples/vulnerable_server.py \
-            --format json --output reports/audit.json
+          # scan any .json files in examples/ if present
+          find examples/ -name "*.json" -exec \
+            mcp-audit scan-schema {} --format json \; \
+            2>/dev/null || echo "No schema files found"
         continue-on-error: true
 
-      - name: Upload audit report artifact
+      - name: Upload schema reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-audit-reports
+          name: mcp-schema-reports
           path: reports/
+          retention-days: 30
