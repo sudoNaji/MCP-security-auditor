@@ -7,6 +7,7 @@ Supports JSON, SARIF (GitHub Code Scanning), and metrics output.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,9 +15,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from scanner import ScanResult
 
+_REPO_URL = "https://github.com/sudoNaji/MCP-security-auditor"
+
 
 def _utcnow() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _parse_line(location: str) -> int:
+    """Extract line number from 'filepath:lineno' strings produced by the scanner."""
+    match = re.search(r":(\d+)$", location)
+    return int(match.group(1)) if match else 1
 
 
 # ─────────────────────────────────────────────────────────────
@@ -28,7 +37,7 @@ def build_json_report(results: list["ScanResult"], version: str = "1.0.0") -> di
     total_findings = sum(len(r.findings) for r in results)
     severity_counts: dict[str, int] = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     threat_counts: dict[str, int] = {}
-    
+
     for r in results:
         for f in r.findings:
             severity_counts[f.severity.value] = severity_counts.get(f.severity.value, 0) + 1
@@ -72,17 +81,16 @@ _SARIF_SEVERITY_MAP = {
 
 def build_sarif_report(results: list["ScanResult"]) -> dict:
     """Build SARIF 2.1.0 report (GitHub Code Scanning compatible)."""
-    
-    # Aggregate all unique rules from DETECTION_RULES
+
     from threats import DETECTION_RULES
     rules = []
     for rule_id, rule_data in DETECTION_RULES.items():
         severity = rule_data.get("severity", "MEDIUM")
-        severity_str = severity.value if hasattr(severity, 'value') else str(severity)
-        
+        severity_str = severity.value if hasattr(severity, "value") else str(severity)
+
         threat_class = rule_data.get("threat_class", "unknown")
-        threat_class_str = threat_class.value if hasattr(threat_class, 'value') else str(threat_class)
-        
+        threat_class_str = threat_class.value if hasattr(threat_class, "value") else str(threat_class)
+
         rules.append({
             "id": rule_id,
             "name": rule_data.get("title", rule_id),
@@ -90,7 +98,7 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
             "defaultConfiguration": {
                 "level": _SARIF_SEVERITY_MAP.get(severity_str, "warning"),
             },
-            "helpUri": "https://github.com/your-org/mcp-security-auditor",
+            "helpUri": _REPO_URL,
             "properties": {
                 "threat_class": threat_class_str,
                 "cwe": rule_data.get("cwe", ""),
@@ -100,20 +108,31 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
     sarif_results = []
     for r in results:
         for f in r.findings:
+            # Parse real line number from location string (e.g. "src/foo.py:42")
+            line_number = _parse_line(f.location)
+
+            # Build a clean relative URI for the artifact
+            uri = r.target.lstrip("/")
+
             sarif_results.append({
                 "ruleId": f.rule_id,
                 "level": _SARIF_SEVERITY_MAP.get(f.severity.value, "warning"),
                 "message": {
-                    "text": f"{f.title}\n\n{f.description}\n\nRecommendation: {f.recommendation}",
+                    "text": (
+                        f"{f.title}\n\n"
+                        f"{f.description}\n\n"
+                        f"Evidence: {f.evidence}\n\n"
+                        f"Recommendation: {f.recommendation}"
+                    ),
                 },
                 "locations": [
                     {
                         "physicalLocation": {
                             "artifactLocation": {
-                                "uri": r.target.lstrip("/"),
+                                "uri": uri,
                                 "uriBaseId": "%SRCROOT%",
                             },
-                            "region": {"startLine": 1},  # Would be parsed from f.location if available
+                            "region": {"startLine": line_number},
                         }
                     }
                 ],
@@ -121,6 +140,7 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
                     "threat_class": f.threat_class.value,
                     "target_type": r.target_type,
                     "evidence": f.evidence,
+                    "cwe": f.cwe,
                 },
             })
 
@@ -132,7 +152,7 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
                 "tool": {
                     "driver": {
                         "name": "MCP Security Auditor",
-                        "informationUri": "https://github.com/your-org/mcp-security-auditor",
+                        "informationUri": _REPO_URL,
                         "version": "1.0.0",
                         "rules": rules,
                     }
