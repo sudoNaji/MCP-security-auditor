@@ -1,0 +1,38 @@
+repos:
+  - repo: local
+    hooks:
+      - id: mcp-audit-source
+        name: MCP Security Audit — source code
+        language: python
+        entry: python src/cli.py scan-source
+        types: [python, javascript, typescript]
+        additional_dependencies: ["click", "rich"]
+        pass_filenames: true
+      
+      - id: mcp-audit-schema
+        name: MCP Security Audit — tool schemas
+        language: python
+        entry: python src/cli.py scan-schema
+        files: ^.*mcp\.json$|^.*tools.*\.json$
+        additional_dependencies: ["click", "rich"]
+        pass_filenames: true
+
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: ["--max-line-length=100"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+      - id: trailing-whitespace
+      - id: end-of-file-fixer

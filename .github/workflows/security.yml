@@ -1,0 +1,66 @@
+name: Security
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  audit:
+    name: MCP Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      
+      - run: pip install click rich pytest
+      
+      - name: Scan examples/ for vulnerabilities
+        run: |
+          mkdir -p reports
+          python src/cli.py scan-source examples/vulnerable_server.py \
+            --format sarif --output reports/source-scan.sarif
+        continue-on-error: true
+      
+      - name: Run unit tests
+        run: pytest tests/ -v
+      
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: reports/source-scan.sarif
+          category: mcp-audit
+
+  audit-examples:
+    name: Audit Example MCP Servers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      
+      - run: pip install click rich
+      
+      - name: Scan synthetic vulnerable server
+        run: |
+          mkdir -p reports
+          python src/cli.py scan-source examples/vulnerable_server.py \
+            --format json --output reports/audit.json
+        continue-on-error: true
+      
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-audit-reports
+          path: reports/
