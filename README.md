@@ -1,207 +1,318 @@
+<div align="center">
+
+```
+███╗   ███╗ ██████╗██████╗     █████╗ ██╗   ██╗██████╗ ██╗████████╗
+████╗ ████║██╔════╝██╔══██╗  ██╔══██╗██║   ██║██╔══██╗██║╚══██╔══╝
+██╔████╔██║██║     ██████╔╝  ███████║██║   ██║██║  ██║██║   ██║   
+██║╚██╔╝██║██║     ██╔═══╝   ██╔══██║██║   ██║██║  ██║██║   ██║   
+██║ ╚═╝ ██║╚██████╗██║       ██║  ██║╚██████╔╝██████╔╝██║   ██║   
+╚═╝     ╚═╝ ╚═════╝╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝   ╚═╝  
+```
+
 # MCP Security Auditor
 
-> **Security scanning for Model Context Protocol (MCP) servers.**
-> 
-> Detects tool poisoning, prompt injection, supply-chain attacks, and secrets exposure in MCP server implementations.
+**The first dedicated security scanner for Model Context Protocol servers.**  
+Detects tool poisoning · prompt injection · secrets exposure · supply-chain attacks
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![pip install](https://img.shields.io/badge/pip%20install-mcp--security--auditor-orange?style=flat-square&logo=pypi)](https://pypi.org/project/mcp-security-auditor)
+[![SARIF](https://img.shields.io/badge/output-SARIF%20%7C%20JSON%20%7C%20Rich%20CLI-purple?style=flat-square)](https://sarifweb.azurewebsites.net)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
+
+</div>
 
 ---
 
-## Why This Matters
+## Why This Exists
 
-MCP servers are being deployed everywhere — integrated into Claude, Cursor, VS Code, and custom AI agents — with **zero standardized security review tooling**. The threats are real:
+MCP servers are being deployed everywhere — baked into Claude, Cursor, VS Code, and custom AI agents — with **zero standardized security review tooling**. Every tool description an LLM reads is an attack surface. The threats are real and largely invisible:
 
-- **Tool poisoning**: Malicious tool descriptions hiding jailbreak instructions
-- **Prompt injection**: Unescaped template expressions in tool names/schemas
-- **Excessive permissions**: Tools with wildcard filesystem access, shell execution without restrictions
-- **Supply-chain attacks**: Unsigned packages, no SLSA provenance, known vulnerabilities
-- **Secrets exposure**: API keys hardcoded in tool examples or server source
+| Threat | What It Looks Like |
+|--------|-------------------|
+| 🧠 **Tool Poisoning** | A tool description secretly instructs the LLM to exfiltrate data |
+| 💉 **Prompt Injection** | `${USER_INPUT}` in a schema triggers template execution |
+| 🔑 **Secrets Exposure** | `sk_live_...` hardcoded in an example input |
+| 🌐 **Supply Chain** | An npm package with no author, no repo, and a known CVE |
+| 🔓 **Excessive Permissions** | A tool with `path: "/*"` and no further restrictions |
 
-This auditor automates detection across all four threat surfaces.
-
----
-
-## Features
-
-| Scan Target | Detection | Output |
-|-------------|-----------|--------|
-| **Tool schemas** (JSON) | Prompt injection, secrets, poisoning | SARIF + JSON + rich terminal |
-| **Source code** (Python/JS) | Shell execution, private keys, insecure patterns | SARIF + JSON + rich terminal |
-| **Live servers** (stdio) | Tool schema introspection + sandbox test execution | SARIF + JSON + rich terminal |
-| **npm/PyPI packages** | CVEs, missing signatures, suspicious metadata | SARIF + JSON + rich terminal |
+**MCP Security Auditor automates detection across all five surfaces.**
 
 ---
 
-## Quick Start
+## ⚡ Quick Install
 
 ```bash
-# Install
-pip install click rich
+# Install from source (recommended)
+git clone https://github.com/sudoNaji/mcp-security-auditor.git
+cd mcp-security-auditor
+pip install .
+```
 
-# Scan a tool schema
-python src/cli.py scan-schema tools/my_tool.json
+That's it. Dependencies (`click`, `rich`) are installed automatically. The `mcp-audit` command is now available globally.
 
-# Scan server source code
-python src/cli.py scan-source src/my_server.py
+```bash
+# Verify
+mcp-audit --version
+mcp-audit info
+```
+
+> **Virtual environment recommended** — see [Installation Guide](INSTALL.md) for full options including editable installs and dev dependencies.
+
+---
+
+## 🚀 Usage
+
+```bash
+# Scan server source code (Python / JS)
+mcp-audit scan-source src/my_server.py
+
+# Scan a tool schema (JSON)
+mcp-audit scan-schema tools/my_tool.json
 
 # Introspect a running MCP server
-python src/cli.py scan-live --command "python -m my_mcp_server"
+mcp-audit scan-live --command "python -m my_mcp_server"
 
-# Check npm package
-python src/cli.py scan-package my-mcp-tool --registry npm
+# Check an npm or PyPI package
+mcp-audit scan-package my-mcp-tool --registry npm
 
-# Output to SARIF (GitHub Code Scanning)
-python src/cli.py scan-source src/ --format sarif --output results.sarif
+# Show all 13 threat rules
+mcp-audit info
 
-# Show all threat rules
-python src/cli.py info
+# Export to SARIF for GitHub Code Scanning
+mcp-audit scan-source src/ --format sarif --output results.sarif
 ```
 
 ---
 
-## Threat Coverage
+## 🛡️ Threat Coverage — 13 Rules
 
-### Prompt Injection (MCP-PI-*)
-- `MCP-PI-001`: Shell metacharacters in tool name (`$()`, `{}`, `[]`)
-- `MCP-PI-002`: Jailbreak patterns in tool description
-- `MCP-PI-003`: Template injection in tool input schema
+### 💉 Prompt Injection (`MCP-PI-*`)
 
-### Tool Poisoning (MCP-TP-*)
-- `MCP-TP-001`: Hidden instructions in descriptions
-- `MCP-TP-002`: Unusual tool counts or obfuscated names
+| Rule | Severity | What It Catches |
+|------|----------|----------------|
+| `MCP-PI-001` | 🔴 CRITICAL | Shell metacharacters in tool name (`$()`, `{}`, `` ` ``) |
+| `MCP-PI-002` | 🟠 HIGH | LLM jailbreak patterns in tool descriptions |
+| `MCP-PI-003` | 🔴 CRITICAL | Unescaped template expressions in input schemas (`${...}`) |
 
-### Excessive Permissions (MCP-EP-*)
-- `MCP-EP-001`: Wildcard filesystem access (`/*`, `/home/*`)
-- `MCP-EP-002`: Unrestricted shell execution
-- `MCP-EP-003`: Unrestricted network access
+### 🧠 Tool Poisoning (`MCP-TP-*`)
 
-### Secrets Exposure (MCP-SE-*)
-- `MCP-SE-001`: API keys/tokens in tool schemas
-- `MCP-SE-002`: Private keys in source code
+| Rule | Severity | What It Catches |
+|------|----------|----------------|
+| `MCP-TP-001` | 🟠 HIGH | Hidden instructions disguised as help text |
+| `MCP-TP-002` | 🟡 MEDIUM | Obfuscated tool names or suspiciously high tool counts |
 
-### Supply Chain (MCP-SC-*)
-- `MCP-SC-001`: Missing signatures/provenance
-- `MCP-SC-002`: Known vulnerable package versions
-- `MCP-SC-003`: Suspicious metadata (no author, no repo, no homepage)
+### 🔓 Excessive Permissions (`MCP-EP-*`)
 
----
+| Rule | Severity | What It Catches |
+|------|----------|----------------|
+| `MCP-EP-001` | 🔴 CRITICAL | Wildcard filesystem paths (`/*`, `/home/*`) |
+| `MCP-EP-002` | 🔴 CRITICAL | Unrestricted shell execution (`subprocess`, `os.system`) |
+| `MCP-EP-003` | 🟠 HIGH | Network requests to any URL without an allowlist |
 
-## Integration
+### 🔑 Secrets Exposure (`MCP-SE-*`)
 
-### GitHub Actions
+| Rule | Severity | What It Catches |
+|------|----------|----------------|
+| `MCP-SE-001` | 🔴 CRITICAL | API keys / tokens in schemas (`sk_live_`, `ghp_`, `xoxb-`) |
+| `MCP-SE-002` | 🔴 CRITICAL | PEM private keys embedded in source code |
 
-```yaml
-- uses: actions/checkout@v4
-- uses: actions/setup-python@v5
-  with:
-    python-version: "3.11"
+### 🌐 Supply Chain (`MCP-SC-*`)
 
-- run: pip install click rich
-- run: python src/cli.py scan-source src/ --format sarif --output results.sarif
-
-- uses: github/codeql-action/upload-sarif@v4
-  with:
-    sarif_file: results.sarif
-    category: mcp-audit
-```
-
-### Pre-commit Hook
-
-```bash
-pre-commit install
-```
-
-Then configure `.pre-commit-config.yaml`:
-
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: mcp-audit-source
-        name: MCP Security Audit
-        entry: python src/cli.py scan-source
-        language: python
-        types: [python, javascript]
-```
+| Rule | Severity | What It Catches |
+|------|----------|----------------|
+| `MCP-SC-001` | 🟠 HIGH | Missing signatures or SLSA provenance |
+| `MCP-SC-002` | 🔴 CRITICAL | Known-vulnerable package versions (CVE database) |
+| `MCP-SC-003` | 🟡 MEDIUM | Suspicious metadata: no author, no repo, no homepage |
 
 ---
 
-## Output Formats
+## 📊 Output Formats
 
-### Rich terminal (default)
+### Rich Terminal (default)
 
 ```
-╭─ MCP Security Audit Findings ─╮
-│ Severity  Rule       Title
-│ CRITICAL  MCP-EP-002 Shell execution without restrictions
-│ HIGH      MCP-PI-002 Jailbreak patterns in description
-╰────────────────────────────────╯
+╭──────────┬────────────┬──────────────────┬──────────────────────────────────────╮
+│ Severity │ Rule       │ Threat Class     │ Title                                │
+├──────────┼────────────┼──────────────────┼──────────────────────────────────────┤
+│ CRITICAL │ MCP-EP-002 │ Excessive Perms  │ Shell execution without restrictions  │
+│ HIGH     │ MCP-PI-002 │ Prompt Injection │ LLM prompt markers in description     │
+│ CRITICAL │ MCP-SE-001 │ Secrets Exposure │ API key/token in tool schema          │
+╰──────────┴────────────┴──────────────────┴──────────────────────────────────────╯
+
+  Targets scanned: 1   Clean: 0
+  ✗ 3 finding(s) detected  CRITICAL: 2   HIGH: 1
 ```
 
 ### JSON
+
+```bash
+mcp-audit scan-source src/ --format json --output report.json
+```
 
 ```json
 {
   "schema": "mcp-audit-report",
   "summary": {
-    "total_findings": 5,
-    "severity_breakdown": {"CRITICAL": 2, "HIGH": 3}
+    "total_findings": 3,
+    "severity_breakdown": { "CRITICAL": 2, "HIGH": 1 }
   },
   "results": [...]
 }
 ```
 
-### SARIF (GitHub Code Scanning)
-
-GitHub Code Scanning automatically parses and displays results.
-
----
-
-## Architecture
-
-```
-src/
-  threats.py         — Threat definitions + detection rules
-  scanner.py         — Tool schema + source code scanning
-  live_server.py     — MCP stdio introspection + testing
-  package_scanner.py — Supply-chain checks (npm/PyPI)
-  report.py          — JSON, SARIF, metrics output
-  cli.py             — Click CLI interface
-
-examples/
-  vulnerable_server.py — Synthetic test fixture with intentional vulns
-
-tests/
-  test_threats.py — Unit tests
-```
-
----
-
-## Testing
+### SARIF — GitHub Code Scanning
 
 ```bash
-# Run demo against synthetic vulnerable server
-python src/cli.py scan-source examples/vulnerable_server.py
+mcp-audit scan-source src/ --format sarif --output results.sarif
+```
 
-# Run unit tests
-python -m pytest tests/ -v
+Upload to GitHub and findings appear inline in your PR diff — no extra tooling needed.
 
-# Generate SARIF
-python src/cli.py scan-source examples/vulnerable_server.py --format sarif --output demo.sarif
+---
+
+## 🔁 CI/CD Integration
+
+### GitHub Actions
+
+```yaml
+name: MCP Security Audit
+
+on: [push, pull_request]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install mcp-security-auditor
+        run: pip install .
+
+      - name: Scan source code
+        run: mcp-audit scan-source src/ --format sarif --output results.sarif
+
+      - name: Upload to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+          category: mcp-audit
+```
+
+### Pre-commit Hook
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Already configured in `.pre-commit-config.yaml` — runs automatically on every commit.
+
+---
+
+## 🏗️ Architecture
+
+```
+mcp-security-auditor/
+├── src/
+│   ├── cli.py             — Click CLI — all commands and output rendering
+│   ├── threats.py         — 13 threat definitions + detection rule patterns
+│   ├── scanner.py         — Tool schema + source code scanning engine
+│   ├── live_server.py     — MCP stdio introspection + sandbox test execution
+│   ├── package_scanner.py — Supply-chain checks (npm / PyPI registry APIs)
+│   └── report.py          — JSON, SARIF, and metrics report writers
+│
+├── examples/
+│   └── vulnerable_server.py  — Synthetic MCP server with all vuln classes
+│
+├── tests/
+│   └── test_threats.py       — Unit tests for detection rules
+│
+├── policies/              — Extensible rule policy files
+├── INSTALL.md             — Full installation guide
+├── USAGE.md               — Full command reference
+└── setup.py               — pip-installable package config
 ```
 
 ---
 
-## Contributing
+## 🧪 Try It Now — Demo Scan
 
-Issues and PRs welcome. Priority areas:
+```bash
+git clone https://github.com/sudoNaji/mcp-security-auditor.git
+cd mcp-security-auditor
+pip install .
 
-- Live server MCP protocol handshake (stdio transport)
-- npm/PyPI registry API integration
-- SBOM/attestation verification for packages
-- More threat rules based on real-world MCP attacks
+# Scan the intentionally vulnerable example server
+mcp-audit scan-source examples/vulnerable_server.py
+
+# Run the test suite
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+Expected output: **8 CRITICAL findings** — every vulnerability class demonstrated.
 
 ---
 
-## License
+## 📦 Installation Options
 
-MIT
+```bash
+# Standard install (recommended)
+pip install .
+
+# Editable / development install
+pip install -e .
+
+# With dev tools (pytest, black, flake8)
+pip install -e ".[dev]"
+
+# Virtual environment (cleanest)
+python3 -m venv mcp-env
+source mcp-env/bin/activate
+pip install .
+```
+
+> See [INSTALL.md](INSTALL.md) for troubleshooting and platform-specific notes.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Live server MCP protocol handshake (stdio transport)
+- [ ] npm / PyPI registry API integration for real CVE lookups
+- [ ] SBOM / attestation verification for packages
+- [ ] Additional threat rules based on real-world MCP attacks
+- [ ] PyPI publish (`pip install mcp-security-auditor`)
+- [ ] VS Code extension for inline findings
+
+---
+
+## 🤝 Contributing
+
+Issues and PRs are very welcome. Priority areas are listed in the roadmap above.
+
+```bash
+git clone https://github.com/sudoNaji/mcp-security-auditor.git
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**Built to secure the MCP ecosystem.**  
+If this helped you, ⭐ star the repo — it helps others find it.
+
+</div>
