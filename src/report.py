@@ -10,7 +10,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from scanner import ScanResult
@@ -20,6 +20,31 @@ _REPO_URL = "https://github.com/sudoNaji/MCP-security-auditor"
 
 def _utcnow() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+_SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN (?:RSA|OPENSSH|EC) PRIVATE KEY-----[\s\S]*?-----END (?:RSA|OPENSSH|EC) PRIVATE KEY-----"),
+    re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9._\-+/=]+"),
+    re.compile(r"\b(?:sk_|pk_|ghp_|xoxb-)[A-Za-z0-9_\-]{10,}\b"),
+    re.compile(r"(?i)\b(password|api[_-]?key|secret|token|credential)\b(\s*[:=]\s*)(['\"]?)[^'\"\s]{6,}\3"),
+]
+
+
+def _redact_secrets_in_text(value: str) -> str:
+    redacted = value
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _redact_secrets(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _redact_secrets(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_secrets(v) for v in value]
+    if isinstance(value, str):
+        return _redact_secrets_in_text(value)
+    return value
 
 
 def _parse_line(location: str) -> int:
@@ -61,7 +86,8 @@ def build_json_report(results: list["ScanResult"], version: str = "1.0.0") -> di
 def write_json_report(results: list["ScanResult"], output_path: Path | None = None) -> str:
     """Write JSON report to file or return as string."""
     report = build_json_report(results)
-    payload = json.dumps(report, indent=2)
+    sanitized_report = _redact_secrets(report)
+    payload = json.dumps(sanitized_report, indent=2)
     if output_path:
         output_path.write_text(payload, encoding="utf-8")
     return payload
@@ -166,7 +192,8 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
 def write_sarif_report(results: list["ScanResult"], output_path: Path | None = None) -> str:
     """Write SARIF report to file or return as string."""
     report = build_sarif_report(results)
-    payload = json.dumps(report, indent=2)
+    sanitized_report = _redact_secrets(report)
+    payload = json.dumps(sanitized_report, indent=2)
     if output_path:
         output_path.write_text(payload, encoding="utf-8")
     return payload
