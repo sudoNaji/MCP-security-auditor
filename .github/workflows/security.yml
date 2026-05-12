@@ -7,13 +7,15 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  id-token: write
 
 jobs:
   audit:
     name: MCP Security Audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +25,10 @@ jobs:
           cache: "pip"
 
       - name: Install mcp-security-auditor
-        run: pip install -e ".[dev]"
+        run: pip install ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/ -v
 
       - name: Scan source for vulnerabilities
         run: |
@@ -31,9 +36,6 @@ jobs:
           mcp-audit scan-source examples/vulnerable_server.py \
             --format sarif --output reports/source-scan.sarif
         continue-on-error: true
-
-      - name: Run unit tests
-        run: pytest tests/ -v
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v4
@@ -45,6 +47,8 @@ jobs:
   audit-examples:
     name: Audit Example MCP Servers
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 

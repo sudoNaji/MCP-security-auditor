@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+mcp-env/
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Reports (generated at runtime)
+reports/
+*.sarif
+*.json
+
+# IDE
+.vscode/
+.idea/

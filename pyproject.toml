@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-security-auditor"
+version = "1.0.0"
+description = "Security auditor for MCP servers — detects tool poisoning, prompt injection, secrets exposure, and supply-chain attacks"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Naji" }]
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+]
+
+[project.scripts]
+mcp-audit = "cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/sudoNaji/MCP-security-auditor"
+Repository = "https://github.com/sudoNaji/MCP-security-auditor"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["cli", "threats", "scanner", "report", "live_server", "package_scanner"]
