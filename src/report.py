@@ -10,41 +10,56 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scanner import ScanResult
 
 _REPO_URL = "https://github.com/sudoNaji/MCP-security-auditor"
 
-
-def _utcnow() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
-
-
-_SECRET_PATTERNS = [
-    re.compile(r"-----BEGIN (?:RSA|OPENSSH|EC) PRIVATE KEY-----[\s\S]*?-----END (?:RSA|OPENSSH|EC) PRIVATE KEY-----"),
-    re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9._\-+/=]+"),
-    re.compile(r"\b(?:sk_|pk_|ghp_|xoxb-)[A-Za-z0-9_\-]{10,}\b"),
-    re.compile(r"(?i)\b(password|api[_-]?key|secret|token|credential)\b(\s*[:=]\s*)(['\"]?)[^'\"\s]{6,}\3"),
+# Patterns that may appear verbatim in evidence strings captured from source lines.
+# Matched values are replaced with [REDACTED] before any file is written.
+_SECRET_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(sk_live_|sk_test_|pk_live_|pk_test_)[A-Za-z0-9]{10,}", re.I),  # Stripe
+    re.compile(r"ghp_[A-Za-z0-9]{36,}"),                                           # GitHub PAT
+    re.compile(r"xoxb-[A-Za-z0-9\-]{40,}"),                                        # Slack bot
+    re.compile(r"xoxp-[A-Za-z0-9\-]{40,}"),                                        # Slack user
+    re.compile(r"AKIA[A-Z0-9]{16}"),                                                # AWS access key
+    re.compile(r"(?i)(password|passwd|api[_-]?key|secret|token|credential)"
+               r"[\s:=]+['\"]?([A-Za-z0-9_\-/.+]{16,})['\"]?"),                   # Generic k=v secrets
+    re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]{20,}"),                               # Bearer tokens
+    re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),                              # PEM headers
 ]
 
 
-def _redact_secrets_in_text(value: str) -> str:
-    redacted = value
+def _redact(text: str) -> str:
+    """Replace secret values in a string with [REDACTED]."""
     for pattern in _SECRET_PATTERNS:
-        redacted = pattern.sub("[REDACTED]", redacted)
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
+
+def _redact_finding(finding_dict: dict) -> dict:
+    """Return a copy of a finding dict with sensitive fields redacted."""
+    redacted = dict(finding_dict)
+    for field in ("evidence", "description", "title"):
+        if field in redacted:
+            redacted[field] = _redact(str(redacted[field]))
     return redacted
 
 
-def _redact_secrets(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {k: _redact_secrets(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_secrets(v) for v in value]
-    if isinstance(value, str):
-        return _redact_secrets_in_text(value)
-    return value
+def _redact_results(results_list: list[dict]) -> list[dict]:
+    """Redact all findings within a serialised results list."""
+    redacted = []
+    for r in results_list:
+        r2 = dict(r)
+        r2["findings"] = [_redact_finding(f) for f in r.get("findings", [])]
+        redacted.append(r2)
+    return redacted
+
+
+def _utcnow() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
 
 
 def _parse_line(location: str) -> int:
@@ -84,13 +99,17 @@ def build_json_report(results: list["ScanResult"], version: str = "1.0.0") -> di
 
 
 def write_json_report(results: list["ScanResult"], output_path: Path | None = None) -> str:
-    """Write JSON report to file or return as string."""
+    """Write JSON report to file or return as string. Evidence is redacted in file output."""
     report = build_json_report(results)
-    sanitized_report = _redact_secrets(report)
-    payload = json.dumps(sanitized_report, indent=2)
+
     if output_path:
-        output_path.write_text(payload, encoding="utf-8")
-    return payload
+        # Redact secrets from evidence fields before writing to disk
+        safe_report = dict(report)
+        safe_report["results"] = _redact_results(report["results"])
+        output_path.write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
+
+    # In-memory / terminal output keeps full evidence for operator review
+    return json.dumps(report, indent=2)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -134,10 +153,7 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
     sarif_results = []
     for r in results:
         for f in r.findings:
-            # Parse real line number from location string (e.g. "src/foo.py:42")
             line_number = _parse_line(f.location)
-
-            # Build a clean relative URI for the artifact
             uri = r.target.lstrip("/")
 
             sarif_results.append({
@@ -147,7 +163,8 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
                     "text": (
                         f"{f.title}\n\n"
                         f"{f.description}\n\n"
-                        f"Evidence: {f.evidence}\n\n"
+                        # Redact evidence in SARIF — uploaded to GitHub servers
+                        f"Evidence: {_redact(f.evidence)}\n\n"
                         f"Recommendation: {f.recommendation}"
                     ),
                 },
@@ -165,7 +182,8 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
                 "properties": {
                     "threat_class": f.threat_class.value,
                     "target_type": r.target_type,
-                    "evidence": f.evidence,
+                    # Redact evidence in properties too — stored in SARIF file
+                    "evidence": _redact(f.evidence),
                     "cwe": f.cwe,
                 },
             })
@@ -190,10 +208,9 @@ def build_sarif_report(results: list["ScanResult"]) -> dict:
 
 
 def write_sarif_report(results: list["ScanResult"], output_path: Path | None = None) -> str:
-    """Write SARIF report to file or return as string."""
+    """Write SARIF report to file or return as string. Evidence is always redacted."""
     report = build_sarif_report(results)
-    sanitized_report = _redact_secrets(report)
-    payload = json.dumps(sanitized_report, indent=2)
+    payload = json.dumps(report, indent=2)
     if output_path:
         output_path.write_text(payload, encoding="utf-8")
     return payload
